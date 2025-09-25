@@ -1,14 +1,25 @@
+// --- IMPORT BAGIAN-BAGIAN PENTING ---
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, ActivityIndicator, Alert, TouchableOpacity, RefreshControl } from 'react-native';
-import { useFocusEffect, router } from 'expo-router';
-import { useAuth } from '@/contexts/authContext';
+import { useFocusEffect, router } from 'expo-router'; // Hook untuk navigasi & efek saat layar aktif
+import { useAuth } from '@/contexts/authContext'; // Mengambil data user & fungsi API
 import ScreenWrapper from '@/components/ScreenWrapper';
 import Typo from '@/components/Typo';
 import { colors, spacingX, spacingY, radius } from '@/constants/theme';
 import { HistoryItem } from '@/types';
-import { Lightning, CalendarX, Wallet } from 'phosphor-react-native';
+import { Lightning, CalendarX, Wallet } from 'phosphor-react-native'; // Ikon
 
-// Komponen kecil untuk Kartu Ringkasan
+// --- KOMPONEN LOKAL (HANYA DIGUNAKAN DI HALAMAN INI) ---
+
+/**
+ * Komponen untuk menampilkan kartu ringkasan data (misal: Konsumsi Hari Ini).
+ * @param {object} props - Properti komponen.
+ * @param {string} props.title - Judul kartu.
+ * @param {string} props.value - Nilai utama yang ditampilkan.
+ * @param {string} props.unit - Satuan dari nilai (misal: kWh, Rp).
+ * @param {React.ReactNode} props.icon - Ikon untuk kartu.
+ * @param {string} props.color - Warna tema untuk ikon.
+ */
 const SummaryCard = ({ title, value, unit, icon, color }: { title: string, value: string, unit: string, icon: React.ReactNode, color: string }) => (
   <View style={styles.summaryCard}>
     <View style={[styles.summaryIconContainer, { backgroundColor: `${color}20` }]}>
@@ -24,8 +35,13 @@ const SummaryCard = ({ title, value, unit, icon, color }: { title: string, value
   </View>
 );
 
-// Komponen kecil untuk Item Riwayat Terakhir
+/**
+ * Komponen untuk menampilkan satu item dari riwayat aktivitas terakhir.
+ * @param {object} props - Properti komponen.
+ * @param {HistoryItem} props.item - Data satu item riwayat.
+ */
 const RecentHistoryItem = ({ item }: { item: HistoryItem }) => (
+  // Jika ditekan, akan pindah ke halaman History
   <TouchableOpacity style={styles.historyItem} onPress={() => router.push('/(tabs)/History')}>
     <View style={styles.historyItemText}>
       <Typo size={16} fontWeight="500" color={colors.neutral800} textProps={{ numberOfLines: 1 }}>
@@ -41,47 +57,63 @@ const RecentHistoryItem = ({ item }: { item: HistoryItem }) => (
   </TouchableOpacity>
 );
 
+
+// --- KOMPONEN UTAMA HALAMAN HOME ---
 const Home = () => {
+  // Mengambil data dan fungsi yang dibutuhkan dari AuthContext
   const { user, getWeeklyStatistics, getMonthlyStatistics, getDeviceHistory } = useAuth();
 
-  const [isLoading, setIsLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [todayKwh, setTodayKwh] = useState(0);
-  const [weeklyKwh, setWeeklyKwh] = useState(0);
-  const [estimatedMonthlyCost, setEstimatedMonthlyCost] = useState(0);
-  const [recentHistory, setRecentHistory] = useState<HistoryItem[]>([]);
+  // --- STATE MANAGEMENT ---
+  const [isLoading, setIsLoading] = useState(true); // Status loading untuk data awal
+  const [refreshing, setRefreshing] = useState(false); // Status untuk pull-to-refresh
+  const [todayKwh, setTodayKwh] = useState(0); // Data konsumsi hari ini
+  const [weeklyKwh, setWeeklyKwh] = useState(0); // Data total konsumsi minggu ini
+  const [estimatedMonthlyCost, setEstimatedMonthlyCost] = useState(0); // Estimasi biaya bulanan
+  const [recentHistory, setRecentHistory] = useState<HistoryItem[]>([]); // 3 riwayat aktivitas terakhir
 
+  /**
+   * Fungsi bantu untuk mendapatkan label hari ini dalam 3 huruf (e.g., "Mon", "Tue").
+   * Berguna untuk mencari data hari ini dari data mingguan yang didapat dari API.
+   */
   const getTodayLabel = () => {
-    const dayIndex = new Date().getDay();
+    const dayIndex = new Date().getDay(); // 0 = Minggu, 1 = Senin, ...
     const labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     return labels[dayIndex];
   };
 
+  /**
+   * Fungsi utama untuk mengambil semua data yang dibutuhkan di halaman dashboard.
+   * Dibuat dengan useCallback agar tidak dibuat ulang di setiap render.
+   */
   const fetchDashboardData = useCallback(async () => {
     try {
+      // Mengambil semua data secara bersamaan (paralel) agar lebih cepat
       const [weeklyRes, monthlyRes, historyRes] = await Promise.all([
         getWeeklyStatistics(),
         getMonthlyStatistics(),
         getDeviceHistory()
       ]);
 
+      // Mengolah data mingguan untuk mendapatkan konsumsi hari ini dan total mingguan
       if (weeklyRes.success && weeklyRes.data) {
         const todayLabel = getTodayLabel();
         const todayData = weeklyRes.data.find(item => item.label === todayLabel);
         setTodayKwh(todayData ? todayData.value : 0);
         
-        // Calculate total weekly consumption
+        // Menghitung total konsumsi mingguan
         const totalWeeklyKwh = weeklyRes.data.reduce((sum, item) => sum + item.value, 0);
         setWeeklyKwh(totalWeeklyKwh);
       }
 
+      // Mengolah data bulanan untuk menghitung estimasi biaya
       if (monthlyRes.success && monthlyRes.data) {
         const totalMonthlyKwh = monthlyRes.data.reduce((sum, item) => sum + item.value, 0);
-        setEstimatedMonthlyCost(totalMonthlyKwh * 1500);
+        setEstimatedMonthlyCost(totalMonthlyKwh * 1500); // Asumsi tarif Rp 1.500/kWh
       }
 
+      // Mengolah data riwayat untuk menampilkan 3 aktivitas terakhir
       if (historyRes.success && historyRes.data) {
-        setRecentHistory(historyRes.data.slice(0, 3));
+        setRecentHistory(historyRes.data.slice(0, 3)); // Ambil 3 item pertama
       }
 
     } catch (error) {
@@ -90,9 +122,10 @@ const Home = () => {
     }
   }, [getWeeklyStatistics, getMonthlyStatistics, getDeviceHistory]);
 
-  // Function untuk handle pull-to-refresh
+  /**
+   * Fungsi untuk menangani aksi pull-to-refresh.
+   */
   const handleRefresh = useCallback(async () => {
-    console.log("Pull-to-refresh triggered on Home page!");
     setRefreshing(true);
     try {
       await fetchDashboardData();
@@ -103,7 +136,9 @@ const Home = () => {
     }
   }, [fetchDashboardData]);
 
-  // Initial load data
+  /**
+   * Fungsi untuk memuat data saat pertama kali halaman dibuka.
+   */
   const loadInitialData = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -113,14 +148,16 @@ const Home = () => {
     }
   }, [fetchDashboardData]);
 
-  // --- PERUBAHAN: Gunakan useFocusEffect untuk auto-refresh ---
+  // --- SIDE EFFECT HOOKS ---
+  // Menggunakan `useFocusEffect` agar data di-refresh setiap kali user kembali ke tab Home.
+  // Ini lebih baik daripada `useEffect` biasa yang hanya jalan sekali.
   useFocusEffect(
     useCallback(() => {
-      console.log("Home/Dashboard page received focus, reloading data...");
       loadInitialData();
     }, [loadInitialData])
   );
 
+  // Tampilan saat data sedang dimuat pertama kali
   if (isLoading) {
     return (
       <ScreenWrapper style={styles.loadingContainer}>
@@ -129,19 +166,22 @@ const Home = () => {
     );
   }
 
+  // --- TAMPILAN UTAMA (RETURN JSX) ---
   return (
     <ScreenWrapper style={styles.container}>
-      <ScrollView 
+      <ScrollView
         showsVerticalScrollIndicator={false}
+        // Konfigurasi untuk pull-to-refresh
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            colors={[colors.mainBlue]} // Android
-            tintColor={colors.mainBlue} // iOS
+            colors={[colors.mainBlue]} // Untuk Android
+            tintColor={colors.mainBlue} // Untuk iOS
           />
         }
       >
+        {/* Header ucapan selamat datang */}
         <View style={styles.headerContainer}>
           <View>
             <Typo size={18} color={colors.neutral600}>Welcome back,</Typo>
@@ -151,23 +191,24 @@ const Home = () => {
           </View>
         </View>
 
+        {/* Kontainer untuk kartu-kartu ringkasan */}
         <View style={styles.summaryContainer}>
-          <SummaryCard 
-            title="Today's Consumption" 
-            value={todayKwh.toFixed(2)} 
+          <SummaryCard
+            title="Today's Consumption"
+            value={todayKwh.toFixed(2)}
             unit="kWh"
-            color= {colors.mainBlue}
+            color={colors.mainBlue}
             icon={<Lightning size={24} color="#3B82F6" weight="fill" />}
           />
-          <SummaryCard 
-            title="This Week" 
-            value={weeklyKwh.toFixed(2)} 
+          <SummaryCard
+            title="This Week"
+            value={weeklyKwh.toFixed(2)}
             unit="kWh"
             color="#10B981"
             icon={<CalendarX size={24} color="#10B981" weight="fill" />}
           />
-          <SummaryCard 
-            title="Est. Monthly Cost" 
+          <SummaryCard
+            title="Est. Monthly Cost"
             value={estimatedMonthlyCost.toLocaleString('id-ID')}
             unit="Rp"
             color="#F59E0B"
@@ -175,6 +216,7 @@ const Home = () => {
           />
         </View>
 
+        {/* Kontainer untuk aktivitas terakhir */}
         <View style={styles.recentActivityContainer}>
           <View style={styles.recentActivityHeader}>
             <Typo size={18} fontWeight="bold" color={colors.neutral800}>Recent Activity</Typo>
@@ -183,6 +225,7 @@ const Home = () => {
             </TouchableOpacity>
           </View>
           
+          {/* Tampilkan daftar riwayat atau pesan 'No Data' */}
           {recentHistory.length > 0 ? (
             recentHistory.map(item => <RecentHistoryItem key={`recent-${item.id}`} item={item} />)
           ) : (
@@ -197,6 +240,8 @@ const Home = () => {
   );
 };
 
+
+// --- STYLING KOMPONEN ---
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -292,6 +337,5 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
-
 
 export default Home;
