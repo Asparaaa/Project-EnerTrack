@@ -1,96 +1,122 @@
+// --- IMPORT BAGIAN-BAGIAN PENTING ---
+// Import library inti dari React dan React Native
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, Dimensions, ActivityIndicator, Alert, TouchableOpacity, RefreshControl } from 'react-native';
+// Import komponen chart dari library react-native-gifted-charts
 import { BarChart, PieChart } from 'react-native-gifted-charts';
 
+// Import context untuk otentikasi dan fungsi API
 import { useAuth } from '@/contexts/authContext';
+// Import komponen-komponen custom
 import ScreenWrapper from '@/components/ScreenWrapper';
 import Typo from '@/components/Typo';
 import { colors, spacingX, spacingY, radius } from '@/constants/theme';
+// Import tipe data (interfaces)
 import { ChartDataPoint, CategoryChartData } from '@/types';
 import { moderateScale, scale } from '@/utils/styling';
+// Import hook dari expo-router untuk navigasi dan side-effects
 import { useFocusEffect, router } from 'expo-router';
 
+// Mengambil lebar layar untuk menentukan lebar chart secara dinamis
 const { width } = Dimensions.get('window');
-const chartWidth = width - (spacingX._20 * 2);
+const chartWidth = width - (spacingX._20 * 2); // Lebar chart = lebar layar dikurangi padding kiri-kanan
 
+// --- FUNGSI BANTU (HELPER FUNCTION) ---
+/**
+ * Fungsi untuk mendapatkan tanggal hari Senin dari minggu saat ini berdasarkan tanggal yang diberikan.
+ * Berguna untuk menampilkan rentang tanggal di header chart mingguan.
+ * @param d Tanggal saat ini (new Date())
+ * @returns Objek Date yang sudah di-set ke hari Senin jam 00:00.
+ */
 const getMonday = (d: Date): Date => {
   const date = new Date(d);
-  const day = date.getDay();
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+  const day = date.getDay(); // 0 = Minggu, 1 = Senin, dst.
+  const diff = date.getDate() - day + (day === 0 ? -6 : 1); // Hitung selisih hari ke Senin
   date.setDate(diff);
-  date.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0); // Reset jam ke awal hari
   return date;
 };
 
+// --- KOMPONEN UTAMA HALAMAN ANALYTICS ---
 const EnergyAnalytics = () => {
+  // Mengambil fungsi-fungsi untuk fetch data statistik dari AuthContext
   const { getWeeklyStatistics, getMonthlyStatistics, getCategoryStatistics } = useAuth();
-  
+
+  // --- STATE MANAGEMENT ---
+  // State untuk menyimpan data mentah dari API sebelum diolah untuk chart
   const [rawWeeklyData, setRawWeeklyData] = useState<ChartDataPoint[]>([]);
   const [rawMonthlyData, setRawMonthlyData] = useState<ChartDataPoint[]>([]);
   const [pieChartData, setPieChartData] = useState<CategoryChartData[]>([]);
-  
-  const [loadingCharts, setLoadingCharts] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [currentWeekDisplay, setCurrentWeekDisplay] = useState('');
-  const [lastRefresh, setLastRefresh] = useState<string>('');
 
+  // State untuk status UI (loading, refresh, dll)
+  const [loadingCharts, setLoadingCharts] = useState(true); // Status loading saat pertama kali buka halaman
+  const [refreshing, setRefreshing] = useState(false); // Status untuk pull-to-refresh
+  const [currentWeekDisplay, setCurrentWeekDisplay] = useState(''); // Teks rentang tanggal minggu ini
+  const [lastRefresh, setLastRefresh] = useState<string>(''); // Teks waktu terakhir refresh
+
+  /**
+   * Fungsi utama untuk mengambil semua data yang dibutuhkan untuk chart dari API.
+   * Menggunakan useCallback agar fungsi ini tidak dibuat ulang di setiap render.
+   * @param isManualRefresh Menandakan apakah fungsi ini dipanggil oleh pull-to-refresh atau bukan.
+   */
   const fetchChartData = useCallback(async (isManualRefresh = false) => {
+    // Set status loading yang sesuai
     if (isManualRefresh) {
       setRefreshing(true);
     } else {
       setLoadingCharts(true);
     }
-    
+
     try {
       const currentTime = new Date();
-      const formattedDate = currentTime.toISOString().split('T')[0];
-      
+      const formattedDate = currentTime.toISOString().split('T')[0]; // Format tanggal YYYY-MM-DD
+
+      // Mengambil data mingguan, bulanan, dan kategori secara bersamaan (paralel) untuk efisiensi
       const [weeklyRes, monthlyRes, categoryRes] = await Promise.all([
         getWeeklyStatistics(formattedDate),
         getMonthlyStatistics(),
         getCategoryStatistics(),
       ]);
 
+      // --- PENGOLAHAN DATA MINGGUAN ---
       if (weeklyRes.success && weeklyRes.data) {
-        const validWeeklyData = weeklyRes.data.map((item: any, index: number) => {
-          return {
-            label: item.label || item.day || `Day ${index + 1}`,
-            value: parseFloat(item.value || item.kwh || item.consumption || 0),
-            frontColor: item.frontColor || '#3B82F6'
-          };
-        });
+        // Membersihkan dan memformat data mingguan agar sesuai dengan format chart
+        const validWeeklyData = weeklyRes.data.map((item: any, index: number) => ({
+          label: item.label || item.day || `Day ${index + 1}`,
+          value: parseFloat(item.value || item.kwh || item.consumption || 0),
+          frontColor: item.frontColor || '#3B82F6'
+        }));
         setRawWeeklyData(validWeeklyData);
       } else {
         setRawWeeklyData([]);
-        console.warn("⚠️ Weekly data is empty or failed to load:", weeklyRes.message);
       }
 
+      // --- PENGOLAHAN DATA BULANAN ---
       if (monthlyRes.success && monthlyRes.data) {
-        // Validate and transform data
+        // Membersihkan, memformat, dan memfilter data bulanan
         const validMonthlyData = monthlyRes.data
-          .map((item: any, index: number) => {
-            return {
-              label: item.label || item.month || `Month ${index + 1}`,
-              value: parseFloat(item.value || item.kwh || item.consumption || 0),
-              frontColor: item.frontColor || '#48C353'
-            };
-          })
+          .map((item: any, index: number) => ({
+            label: item.label || item.month || `Month ${index + 1}`,
+            value: parseFloat(item.value || item.kwh || item.consumption || 0),
+            frontColor: item.frontColor || '#48C353'
+          }))
           .filter(item => {
-            // Filter out 'W5' or any week labels beyond 'W4' if they appear in monthly data
+            // Filter anomali data, misalnya label 'W5' (minggu ke-5) yang tidak seharusnya ada di data bulanan per minggu
             const label = item.label.toUpperCase();
             if (label.startsWith('W')) {
               const weekNumber = parseInt(label.substring(1), 10);
               return !isNaN(weekNumber) && weekNumber >= 1 && weekNumber <= 4;
             }
-            return true; // Keep non-week labels
+            return true;
           });
         setRawMonthlyData(validMonthlyData);
       } else {
         setRawMonthlyData([]);
       }
 
+      // --- PENGOLAHAN DATA KATEGORI (UNTUK PIE CHART) ---
       if (categoryRes.success && categoryRes.data) {
-        // Validate and transform data
+        // Fungsi helper untuk menentukan warna pie chart berdasarkan nama kategori
         const getPieColor = (name: string) => {
           switch (name) {
             case 'Entertainment': return colors.catBlue;
@@ -99,9 +125,10 @@ const EnergyAnalytics = () => {
             case 'Lighting': return colors.catYellow;
             case 'Health': return colors.catRed;
             case 'Heating': return colors.catOrange;
-            default: return `#${Math.floor(Math.random()*16777215).toString(16)}`;
+            default: return `#${Math.floor(Math.random() * 16777215).toString(16)}`; // Warna random jika kategori tidak dikenal
           }
         };
+        // Memformat data kategori
         const validCategoryData = categoryRes.data.map((item: any, index: number) => {
           const name = item.name || item.category || `Category ${index + 1}`;
           return {
@@ -115,28 +142,38 @@ const EnergyAnalytics = () => {
       } else {
         setPieChartData([]);
       }
-      
+
+      // Set waktu terakhir refresh
       setLastRefresh(currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-      
+
     } catch (error: any) {
       console.error("❌ Error loading chart data:", error);
       Alert.alert('Error', error.message || 'An error occurred while loading chart data.');
     } finally {
+      // Hentikan semua status loading setelah selesai (baik sukses maupun gagal)
       setLoadingCharts(false);
       setRefreshing(false);
     }
   }, [getWeeklyStatistics, getMonthlyStatistics, getCategoryStatistics]);
 
+  /**
+   * Handler untuk pull-to-refresh.
+   */
   const handleManualRefresh = useCallback(() => {
     fetchChartData(true);
   }, [fetchChartData]);
 
+  // --- SIDE EFFECTS HOOKS ---
+  // useFocusEffect akan menjalankan fungsinya setiap kali layar ini mendapatkan fokus (dibuka oleh user).
+  // Ini memastikan data selalu yang terbaru saat user kembali ke halaman ini.
   useFocusEffect(
     useCallback(() => {
-      fetchChartData(false);
+      fetchChartData(false); // Panggil fetch data saat layar fokus
     }, [fetchChartData])
   );
 
+  // useEffect ini hanya berjalan sekali saat komponen pertama kali dimuat.
+  // Tujuannya untuk mengatur teks rentang tanggal (misal: "Sep 23 - Sep 29, 2025").
   useEffect(() => {
     const today = new Date();
     const mondayOfCurrentWeek = getMonday(today);
@@ -146,37 +183,47 @@ const EnergyAnalytics = () => {
     const displayText = `${mondayOfCurrentWeek.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })} - ${sundayOfCurrentWeek.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}`;
     setCurrentWeekDisplay(displayText);
   }, []);
-  
-  // Fixed condition to display chart - more permissive
+
+  // --- KALKULASI & LOGIKA TAMPILAN ---
+  // Menghitung total kWh mingguan dari data yang sudah di-fetch
   const totalWeeklyKwh = rawWeeklyData.reduce((sum, item) => sum + (item.value || 0), 0);
+  // Kondisi untuk menampilkan pesan "No Data" di chart mingguan
   const showNoDataForWeeklyChart = !rawWeeklyData || rawWeeklyData.length === 0 || totalWeeklyKwh === 0;
-  
+
+  // Menghitung total kWh bulanan
   const totalMonthlyKwh = rawMonthlyData.reduce((sum, item) => sum + (item.value || 0), 0);
+  // Kondisi untuk menampilkan pesan "No Data" di chart bulanan
   const showNoDataForMonthlyChart = !rawMonthlyData || rawMonthlyData.length === 0 || totalMonthlyKwh === 0;
-  
+
+  /**
+   * Fungsi untuk menghitung nilai maksimum yang akan ditampilkan di sumbu Y chart.
+   * Dibuat agar skala chart terlihat bagus dan tidak terlalu mepet.
+   * @param data Array data chart.
+   * @param defaultMax Nilai default jika tidak ada data.
+   * @param stepMultiple Pembulatan ke kelipatan angka ini (misal: 5).
+   * @returns Nilai maksimum untuk properti `maxValue` chart.
+   */
   const getMaxChartValue = (data: ChartDataPoint[], defaultMax: number, stepMultiple: number = 5): number => {
     if (!data || data.length === 0) return defaultMax;
     const maxValue = Math.max(...data.map(item => item.value || 0));
     if (maxValue === 0) return defaultMax;
+    // Hitung nilai max dengan buffer 30%, lalu bulatkan ke atas ke kelipatan `stepMultiple`
     const calculatedMax = Math.ceil(maxValue * 1.3 / stepMultiple) * stepMultiple;
-    return Math.max(calculatedMax, stepMultiple);
+    return Math.max(calculatedMax, stepMultiple); // Pastikan nilai minimum adalah `stepMultiple`
   };
 
+  // Menentukan nilai maksimum untuk setiap chart secara dinamis
   const weeklyChartMaxValue = getMaxChartValue(rawWeeklyData, 10);
-  const monthlyCostMaxValue = getMaxChartValue(rawMonthlyData.map(d=> ({...d, value: (d.value || 0) * 1500})), 50000, 5000);
-  const monthlyCostNoOfSections = Math.max(1, monthlyCostMaxValue / 5000);
+  const monthlyCostMaxValue = getMaxChartValue(rawMonthlyData.map(d => ({ ...d, value: (d.value || 0) * 1500 })), 50000, 5000);
+  const monthlyCostNoOfSections = Math.max(1, monthlyCostMaxValue / 5000); // Menentukan jumlah garis horizontal di chart
   const totalKwhFromCategories = pieChartData.reduce((acc, item) => acc + item.total_power, 0);
 
-  const getTodayLabel = () => {
-    const dayIndex = new Date().getDay();
-    const labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    return labels[dayIndex];
-  };
-
+  // --- TAMPILAN (RENDER) ---
   return (
     <ScreenWrapper style={styles.container}>
-      <ScrollView 
+      <ScrollView
         showsVerticalScrollIndicator={false}
+        // Konfigurasi untuk pull-to-refresh
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -186,50 +233,55 @@ const EnergyAnalytics = () => {
           />
         }
       >
+        {/* Tampilkan loading indicator besar saat pertama kali memuat data */}
         {loadingCharts ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={colors.mainBlue} />
             <Typo style={styles.loadingText}>Loading data...</Typo>
           </View>
         ) : (
+          // Jika tidak loading, tampilkan konten utama
           <View style={styles.contentContainer}>
+            {/* Info waktu terakhir refresh */}
             <View style={styles.refreshInfoContainer}>
               <Typo size={12} color={colors.neutral500}>
                 Last refresh: {lastRefresh}
               </Typo>
             </View>
 
-            {/* WEEKLY ENERGY CONSUMPTION - BAR CHART */}
+            {/* --- CARD 1: KONSUMSI ENERGI MINGGUAN (BAR CHART) --- */}
             <View style={styles.chartContainer}>
               <View style={styles.chartHeader}>
                 <Typo size={16} fontWeight="600" color={colors.mirage}>Energy Consumption (kWh)</Typo>
-                <Typo size={14} fontWeight="500" color={colors.textDarkGrey} style={{marginTop: 4}}>
+                <Typo size={14} fontWeight="500" color={colors.textDarkGrey} style={{ marginTop: 4 }}>
                   {currentWeekDisplay}
                 </Typo>
-                <Typo size={18} fontWeight="bold" color={colors.mirage} style={{marginTop: 2}}>
+                <Typo size={18} fontWeight="bold" color={colors.mirage} style={{ marginTop: 2 }}>
                   This Week Total: {totalWeeklyKwh.toFixed(2)} kWh
                 </Typo>
               </View>
-              
+
+              {/* Tampilkan pesan 'No Data' atau chart-nya */}
               {showNoDataForWeeklyChart ? (
                 <View style={styles.noDataContainer}>
                   <Typo style={styles.noDataText}>
                     No consumption data available for this week. Start adding your energy consumption data!
                   </Typo>
-                  <TouchableOpacity 
-                      style={styles.addDataButton}
-                      onPress={() => router.push('/Calculate')}
-                    >
-                      <Typo style={styles.addDataButtonText}>Add Data</Typo>
-                    </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.addDataButton}
+                    onPress={() => router.push('/Calculate')} // Tombol untuk pindah ke halaman kalkulator
+                  >
+                    <Typo style={styles.addDataButtonText}>Add Data</Typo>
+                  </TouchableOpacity>
                 </View>
               ) : (
                 <View style={{ marginLeft: -20 }}>
                   <BarChart
                     data={rawWeeklyData.map(item => ({
                       ...item,
-                      value: Math.max(item.value || 0, 0)
+                      value: Math.max(item.value || 0, 0) // Pastikan value tidak negatif
                     }))}
+                    // Properti untuk styling dan fungsionalitas chart
                     width={chartWidth}
                     height={220}
                     isAnimated
@@ -242,22 +294,18 @@ const EnergyAnalytics = () => {
                     spacing={scale(22)}
                     initialSpacing={scale(15)}
                     noOfSections={4}
-                    xAxisLabelTextStyle={{color: colors.neutral500}}
-                    yAxisTextStyle={{color: colors.neutral500}}
+                    xAxisLabelTextStyle={{ color: colors.neutral500 }}
+                    yAxisTextStyle={{ color: colors.neutral500 }}
                     yAxisLabelSuffix=" kWh"
                     yAxisLabelWidth={65}
-                    showValuesAsTopLabel={false}
                     rulesType="solid"
                     rulesColor="#E2E8F0"
-                    showReferenceLine1={false}
-                    showReferenceLine2={false}
-                    showReferenceLine3={false}
                   />
                 </View>
               )}
             </View>
-            
-            {/* CONSUMPTION BY CATEGORY - PIE CHART */}
+
+            {/* --- CARD 2: KONSUMSI BERDASARKAN KATEGORI (PIE CHART) --- */}
             <View style={styles.chartContainer}>
               <View style={styles.chartHeader}>
                 <Typo size={16} fontWeight="600" color={colors.mirage}>Consumption by Category</Typo>
@@ -272,6 +320,7 @@ const EnergyAnalytics = () => {
                       innerRadius={moderateScale(50)}
                     />
                   </View>
+                  {/* Bagian legenda untuk pie chart */}
                   <View style={styles.legendContainer}>
                     {pieChartData.map((item, index) => (
                       <View key={index} style={styles.legendItem}>
@@ -286,13 +335,13 @@ const EnergyAnalytics = () => {
                 </View>
               ) : (
                 <View style={styles.noDataContainer}>
-                   <Typo style={styles.noDataText}>No consumption data available by category.</Typo>
+                  <Typo style={styles.noDataText}>No consumption data available by category.</Typo>
                 </View>
               )}
             </View>
-            
-            {/* MONTHLY COST - BAR CHART */}
-             <View style={styles.chartContainer}>
+
+            {/* --- CARD 3: TREN BIAYA BULANAN (BAR CHART) --- */}
+            <View style={styles.chartContainer}>
               <View style={styles.chartHeader}>
                 <Typo size={16} fontWeight="600" color={colors.mirage}>Monthly Cost Trends (Rp)</Typo>
               </View>
@@ -301,11 +350,11 @@ const EnergyAnalytics = () => {
                   <Typo style={styles.noDataText}>No cost data available for this month.</Typo>
                 </View>
               ) : (
-                <View style={{ marginLeft: -15}}>
+                <View style={{ marginLeft: -15 }}>
                   <BarChart
-                    data={rawMonthlyData.map(item => ({ 
-                      ...item, 
-                      value: Math.max((item.value || 0) * 1500, 0)
+                    data={rawMonthlyData.map(item => ({
+                      ...item,
+                      value: Math.max((item.value || 0) * 1500, 0) // Konversi kWh ke Rupiah (asumsi tarif 1500/kWh)
                     }))}
                     width={chartWidth}
                     height={220}
@@ -319,16 +368,12 @@ const EnergyAnalytics = () => {
                     spacing={scale(50)}
                     initialSpacing={scale(20)}
                     noOfSections={monthlyCostNoOfSections}
-                    xAxisLabelTextStyle={{color: colors.neutral500}}
-                    yAxisTextStyle={{color: colors.neutral500}}
+                    xAxisLabelTextStyle={{ color: colors.neutral500 }}
+                    yAxisTextStyle={{ color: colors.neutral500 }}
                     yAxisLabelPrefix="Rp "
                     yAxisLabelWidth={65}
-                    showValuesAsTopLabel={false}
                     rulesType="solid"
                     rulesColor="#E2E2E2"
-                    showReferenceLine1={false}
-                    showReferenceLine2={false}
-                    showReferenceLine3={false}
                   />
                 </View>
               )}
@@ -341,6 +386,8 @@ const EnergyAnalytics = () => {
   );
 };
 
+// --- STYLING KOMPONEN ---
+// Menggunakan StyleSheet.create untuk performa yang lebih baik
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -367,17 +414,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacingX._20,
     paddingBottom: spacingY._10,
   },
-  refreshButton: {
-    backgroundColor: colors.neutral200,
-    paddingVertical: spacingY._5,
-    paddingHorizontal: spacingX._10,
-    borderRadius: radius._6,
-  },
-  refreshButtonText: {
-    fontSize: moderateScale(12),
-    color: colors.neutral700,
-    fontWeight: '500',
-  },
   chartContainer: {
     backgroundColor: colors.white,
     borderRadius: radius._12,
@@ -401,10 +437,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginVertical: spacingY._15,
     height: moderateScale(200),
-  },
-  centerLabel: {
-    justifyContent: 'center',
-    alignItems: 'center'
   },
   legendContainer: {
     marginTop: spacingY._20,
@@ -452,22 +484,6 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: moderateScale(14),
     fontWeight: '600',
-  },
-  zeroDataOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-  },
-  zeroDataText: {
-    color: colors.neutral500,
-    fontSize: moderateScale(12),
-    textAlign: 'center',
-    fontStyle: 'italic',
   },
 });
 
