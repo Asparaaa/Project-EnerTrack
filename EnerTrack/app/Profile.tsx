@@ -1,48 +1,67 @@
+// --- IMPORT BAGIAN-BAGIAN PENTING ---
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, ScrollView, TouchableOpacity, StyleSheet, Platform, Alert, TextInput, RefreshControl } from 'react-native';
 import { colors, spacingX, spacingY, radius } from '@/constants/theme';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import Typo from '@/components/Typo';
 import { ProfileCard } from '@/components/card/ProfileCard';
-import { useAuth } from '@/contexts/authContext';
+import { useAuth } from '@/contexts/authContext'; // Hook untuk mengakses data user, fungsi logout, dll.
 import { useRouter } from 'expo-router';
 
+// --- DEFINISI TIPE DATA (INTERFACE) ---
+// Mendefinisikan struktur data profil yang akan ditampilkan dan di-edit.
 export interface ProfileDisplayData {
   username: string;
   email: string;
 }
 
+// --- KOMPONEN UTAMA HALAMAN PROFIL ---
 const Profile: React.FC = () => {
   const router = useRouter();
   const { user, logout: contextLogout, updateUserData } = useAuth();
 
+  // --- STATE MANAGEMENT ---
+  // State untuk data yang ditampilkan di UI (tidak berubah saat diedit)
   const [displayData, setDisplayData] = useState<ProfileDisplayData>({
     username: '',
     email: '',
   });
 
+  // State untuk data yang sedang di-edit di dalam form. Dipisahkan agar UI tidak langsung berubah saat user mengetik.
   const [editableData, setEditableData] = useState<ProfileDisplayData>({ ...displayData });
+  // State untuk beralih antara tampilan profil utama dan tampilan pengaturan akun
   const [showAccountSettings, setShowAccountSettings] = useState<boolean>(false);
+  // State untuk beralih antara mode lihat dan mode edit di halaman pengaturan akun
   const [isEditing, setIsEditing] = useState<boolean>(false);
+  // State untuk fitur pull-to-refresh
   const [refreshing, setRefreshing] = useState(false);
 
+  // --- SIDE EFFECT HOOKS ---
+  // useEffect ini akan berjalan setiap kali objek `user` dari context berubah.
+  // Tujuannya adalah untuk menyinkronkan state lokal komponen dengan data user terbaru.
   useEffect(() => {
     if (user) {
       const currentUserData = {
         username: user.username || 'No Username',
         email: user.email || 'No Email',
       };
-      setDisplayData(currentUserData);
-      setEditableData(currentUserData);
+      setDisplayData(currentUserData); // Update data yang ditampilkan
+      setEditableData(currentUserData); // Update data untuk form edit
     }
   }, [user]);
 
+  // --- EVENT HANDLERS ---
+
+  /**
+   * Fungsi untuk menangani aksi pull-to-refresh.
+   * Mensimulasikan pengambilan data baru dan memperbarui state.
+   */
   const handleRefresh = useCallback(async () => {
-    console.log("Pull-to-refresh triggered on Profile page!");
     setRefreshing(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000)); 
-      if (user) { 
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulasi jeda jaringan
+      if (user) {
+        // Logika yang sama seperti di useEffect untuk re-sync data
         const currentUserData = {
           username: user.username || 'No Username',
           email: user.email || 'No Email',
@@ -51,85 +70,108 @@ const Profile: React.FC = () => {
         setEditableData(currentUserData);
       }
     } catch (error) {
-      console.error("Error refreshing profile data:", error);
       Alert.alert("Error", "Failed to refresh profile data.");
     } finally {
       setRefreshing(false);
     }
   }, [user]);
 
+  /**
+   * Fungsi untuk menangani proses logout.
+   */
   const handleLogout = async () => {
     const res = await contextLogout();
     if (res && res.success) {
       Alert.alert('Success', 'Logout successful!');
+      // Navigasi ke halaman login akan ditangani oleh AuthProvider/Router
     }
   };
 
+  /**
+   * Fungsi untuk beralih antara halaman profil dan halaman pengaturan akun.
+   */
   const toggleAccountSettings = () => {
     setShowAccountSettings(prev => !prev);
-    setIsEditing(false); 
+    setIsEditing(false); // Selalu reset ke mode non-edit saat beralih halaman
   };
 
+  /**
+   * Fungsi untuk menangani perubahan teks pada input form.
+   * @param field Nama field yang berubah ('username' atau 'email').
+   * @param value Nilai baru dari input.
+   */
   const handleInputChange = (field: keyof ProfileDisplayData, value: string) => {
     setEditableData(prev => ({ ...prev, [field]: value }));
   };
 
+  /**
+   * Mengaktifkan mode edit di halaman pengaturan akun.
+   */
   const handleEdit = () => { setIsEditing(true); };
 
+  /**
+   * Membatalkan perubahan dan keluar dari mode edit.
+   */
   const handleCancel = () => {
-    setEditableData({ ...displayData }); 
+    setEditableData({ ...displayData }); // Kembalikan data form ke data terakhir yang disimpan
     setIsEditing(false);
   };
 
+  /**
+   * Menyimpan perubahan data profil ke backend.
+   */
   const handleSave = async () => {
+    // Panggil fungsi update dari context
     const result = await updateUserData({
         username: editableData.username,
         email: editableData.email,
     });
     
     if (result.success) {
-        setDisplayData(editableData); 
-        setIsEditing(false);
+        setDisplayData(editableData); // Update data yang ditampilkan dengan data baru
+        setIsEditing(false); // Keluar dari mode edit
         Alert.alert("Success", "Profile updated successfully!");
     } else {
         Alert.alert("Failed", result.message || "Failed to update profile.");
     }
   };
 
-  //  Account Settings
+
+  // --- TAMPILAN KONDISIONAL ---
+  // Tampilan akan berubah tergantung pada nilai state `showAccountSettings`.
+
+  // --- Tampilan 1: Pengaturan Akun ---
+  // Tampilan ini muncul jika `showAccountSettings` adalah `true`.
   if (showAccountSettings) {
     return (
       <ScreenWrapper>
         <View style={styles.fullScreenHeader}>
-          <TouchableOpacity onPress={toggleAccountSettings} style={styles.fullScreenBackToProfileText}> 
+          <TouchableOpacity onPress={toggleAccountSettings} style={styles.fullScreenBackToProfileText}>
             <Typo size={16} fontWeight="500" color={colors.mainBlue}>← Back to Profile</Typo>
           </TouchableOpacity>
         </View>
         <ScrollView
           style={styles.mainContent}
-          contentContainerStyle={styles.scrollViewContent} 
+          contentContainerStyle={styles.scrollViewContent}
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              colors={[colors.mainBlue]}
-              tintColor={colors.mainBlue}
-            />
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[colors.mainBlue]} tintColor={colors.mainBlue} />
           }
         >
-          <View style={styles.contentContainer}> 
+          <View style={styles.contentContainer}>
             <View style={styles.settingsCard}>
               <Typo size={20} fontWeight="bold" color={colors.neutral800} style={styles.cardTitle}> Account Settings </Typo>
               
+              {/* Form untuk Username */}
               <View style={styles.formGroup}>
                 <Typo size={16} color={colors.neutral700} style={styles.formLabel}>Username</Typo>
                 <TextInput
                   style={styles.formInput}
                   value={editableData.username}
                   onChangeText={(text) => handleInputChange('username', text)}
-                  editable={isEditing}
+                  editable={isEditing} // Input bisa diedit atau tidak tergantung state `isEditing`
                 />
               </View>
+              {/* Form untuk Email */}
               <View style={styles.formGroup}>
                 <Typo size={16} color={colors.neutral700} style={styles.formLabel}>Email</Typo>
                 <TextInput
@@ -141,7 +183,9 @@ const Profile: React.FC = () => {
                 />
               </View>
               
+              {/* Tombol Aksi Form */}
               <View style={styles.formActions}>
+                {/* Tampilkan tombol 'Save' dan 'Cancel' jika dalam mode edit */}
                 {isEditing ? (
                   <View style={{ flexDirection: 'row', gap: spacingX._12 }}>
                     <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
@@ -152,6 +196,7 @@ const Profile: React.FC = () => {
                     </TouchableOpacity>
                   </View>
                 ) : (
+                  // Tampilkan tombol 'Edit Profile' jika tidak dalam mode edit
                   <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
                     <Typo size={16} fontWeight="500" color={colors.white}>Edit Profile</Typo>
                   </TouchableOpacity>
@@ -164,21 +209,18 @@ const Profile: React.FC = () => {
     );
   }
 
-  // Default Profile Page
+  // --- Tampilan 2: Profil Default ---
+  // Tampilan ini muncul jika `showAccountSettings` adalah `false`.
   return (
     <ScreenWrapper>
       <ScrollView
         style={styles.mainContent}
         contentContainerStyle={styles.scrollViewContent}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            colors={[colors.mainBlue]}
-            tintColor={colors.mainBlue}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[colors.mainBlue]} tintColor={colors.mainBlue} />
         }
       >
+        {/* Header Halaman Profil */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.push('/(tabs)/Home')} style={[styles.backButton, { marginBottom: spacingY._16 }]}>
             <Typo size={16} fontWeight="500" color={colors.mainBlue}>← Back to Dashboard</Typo>
@@ -191,10 +233,12 @@ const Profile: React.FC = () => {
           </View>
         </View>
         
+        {/* Kartu Profil */}
         <View style={styles.contentContainer}>
           <ProfileCard userData={displayData} />
         </View>
 
+        {/* Tombol Aksi Utama */}
         <View style={styles.buttonContainer}>
           <TouchableOpacity style={styles.settingsButton} onPress={toggleAccountSettings}>
             <Typo size={16} fontWeight="500" color={colors.white}>Account Settings</Typo>
@@ -208,6 +252,7 @@ const Profile: React.FC = () => {
   );
 };
 
+// --- STYLING KOMPONEN ---
 const styles = StyleSheet.create({
   mainContent: {
     flex: 1,
@@ -221,14 +266,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacingX._20,
     paddingBottom: spacingY._24,
     backgroundColor: colors.neutral50,
-    marginTop: spacingY._20, 
+    marginTop: spacingY._20,
   },
   contentContainer: {
-    paddingHorizontal: spacingX._20, 
+    paddingHorizontal: spacingX._20,
     paddingVertical: 0,
   },
   buttonContainer: {
-    paddingHorizontal: spacingX._20, 
+    paddingHorizontal: spacingX._20,
     paddingBottom: spacingY._24,
     marginTop: spacingY._20,
   },
